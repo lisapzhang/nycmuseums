@@ -1,0 +1,24 @@
+name: "nycmuseums"
+project:
+  type: website
+  output_dir: "_site"
+
+website:
+navbar:
+    title: "NYC Museums"
+    left:
+      - text: "Introduction"
+        href: index.html
+      - text: "Visualization and Analysis"
+        href: visanalysis.html
+      - text: "About"
+        href: about.html
+
+output: 
+  bookdown::html_document2:
+    code_folding: hide
+    theme: paper
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true

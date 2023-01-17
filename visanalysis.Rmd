@@ -1,0 +1,661 @@
+---
+title: "Data Visualization and Analysis"
+format: html
+editor: source
+---
+
+## Data Scraping {.unnumbered}
+
+```{r echo = FALSE, message = FALSE}
+#| label: library-packages
+library(tidyverse)
+library(rvest)
+library(lubridate)
+library(robotstxt)
+library(scales)
+library(ggplot2)
+library(dplyr)
+library(mnormt)
+library(leaflet)
+library(gstat)
+library(sp)
+library(SemiPar)
+library(sf)
+library(ggspatial)
+library(tigris)
+library(htmlwidgets)
+library(vroom)
+library(plotly)
+library(bookdown)
+library(kableExtra)
+library(gt)
+```
+
+```{r}
+#| label: paths-allowed
+paths_allowed("https://museumhack.com/museums-in-nyc/#list-museums-in-NYC")
+```
+
+```{r}
+#| label: read-page
+page <- read_html("https://museumhack.com/museums-in-nyc/#list-museums-in-NYC")
+```
+
+```{r}
+#| label: parse-components
+name <- page |>
+  html_elements(".h2") |>
+  html_text2()
+
+category <- page |>
+  html_elements(".text-muted") |>
+  html_text2() |>
+  str_remove(" Museum")
+
+price <- page |>
+  html_elements("li:nth-child(2) .small") |>
+  html_text2() |>
+  str_remove(" per person")
+
+address <- page |>
+  html_elements("li~ li+ li .small") |>
+  html_text2()
+
+highlight1 <- page |>
+  html_elements(".col-sm-8 li:nth-child(1)") |>
+  html_text2()
+
+```
+
+```{r}
+#| label: create-dataframe
+museums_raw <- tibble(
+  name = name,
+  category = category,
+  price = price,
+  address = address,
+  highlight1 = highlight1
+)
+```
+
+```{r}
+#| label: clean-data
+museums <- museums_raw |>
+  mutate(price = str_remove(price, "\\$"),
+         price = str_remove(price, " "),
+         price = na_if(price, ""),
+         price = na_if(price, "Donation"),
+         price = case_when(price == "20-29" ~ "20", 
+                           price == "15+" ~ "15",
+                           TRUE ~ price),
+         price = as.integer(price))
+glimpse(museums)
+```
+
+```{r}
+#| label: meanprice
+meanprice <- museums |>
+  group_by(category) |>
+  na.omit() |>
+  mutate(catmeanprice = mean(price),
+         catmeanprice = as.integer(catmeanprice))
+
+meanprice <- meanprice |>
+  group_by(category) |>
+  mutate(pricedifference = price - catmeanprice)
+
+catmeanprice <- museums |>
+  drop_na() |>
+  group_by(category) |>
+  summarise(meanprice = mean(price))
+
+```
+
+```{r}
+#| label: subset-by-category
+
+archaeological <- meanprice |>
+  filter(category == "Archaeological")
+
+art <- meanprice |>
+  filter(category == "Art")
+
+childrens <- meanprice |>
+  filter(category == "Children's")
+
+cultural <- meanprice |>
+  filter(category == "Cultural Center")
+
+encyclopedic <- meanprice |>
+  filter(category == "Encyclopedic")
+
+historic <- meanprice |>
+  filter(category == "Historic Site")
+
+history <- meanprice |>
+  filter(category == "History")
+
+library <- meanprice |>
+  filter(category == "Library")
+
+natural <- meanprice |>
+  filter(category == "Natural History")
+
+religious <- meanprice |>
+  filter(category == "Religious")
+
+specialty <- meanprice |>
+  filter(category == "Specialty")
+
+war <- meanprice |>
+  filter(category == "War")
+  
+```
+
+```{r}
+paths_allowed("https://www.nycbynatives.com/nyc_info/new_york_city_zip_codes.php")
+
+page <- read_html("https://www.nycbynatives.com/nyc_info/new_york_city_zip_codes.php")
+
+zip <- page |>
+  html_elements("td:nth-child(1) , td:nth-child(4)") |>
+  html_text2()
+
+borough <- page |>
+  html_elements("td:nth-child(5) , td:nth-child(2)") |>
+  html_text2() 
+
+zipborough <- tibble(
+  zip = zip,
+  borough = borough
+)
+
+```
+
+## Visualizing Data {.unnumbered}
+
+### Number by Category {.unnumbered}
+
+```{r}
+#| label: fig-number-by-category
+#| fig-cap: "Number of museums in NYC by category"
+museumscat <- museums |>
+  group_by(category) |>
+  count(category) 
+
+museumscat |>
+  ggplot(
+    aes(x = n, y = category, fill = category)) +
+  geom_bar(stat = "identity") + 
+  labs(x = "Count",
+       y = "Category",
+       title = "Number of Museums in NYC by Category",
+       fill = "Category") +
+  scale_y_discrete(limits = rev)
+```
+
+### Number by Price {.unnumbered}
+
+```{r message = FALSE, warning = FALSE}
+#| label: fig-number-by-price
+#| fig-cap: "Number of museums in NYC by price"
+museumsprice <- museums |>
+  drop_na() |>
+  group_by(price) |>
+  count(price)
+
+museumsprice |>
+  ggplot(
+    aes(x = price, y = n, fill = price)) +
+  geom_histogram(stat = "identity", binwidth = 1000, show.legend = FALSE) + 
+  labs(x = "Price",
+       y = "Count",
+       title = "Number of Museums in NYC by Price",
+       fill = "Category")
+  
+```
+
+### Price Difference by Category {.unnumbered}
+
+```{r}
+#| label: catmeanprice
+catmeanprice |>
+  mutate(meanprice = round(meanprice, digits = 2)) |>
+  mutate(meanprice = scales::dollar(meanprice)) |>
+  rename("Category" = "category", "Mean Price" = "meanprice") |>
+  kable(format = "markdown", padding=10, caption = "Mean ticket price per category")
+```
+
+```{r}
+#| label: fig-archaeological-pricedifference
+#| fig-cap: "Difference from average ticket price for NYC archaeological museums"
+archaeological |>
+  ggplot(
+    aes(x = name, y = price, label = pricedifference)) +
+  geom_point(size = 8, show.legend = FALSE, color = "#f8766d") +
+  geom_segment(aes(y = 4.3,
+               x = name,
+               yend = price,
+               xend = name),
+               color = "#f8766d") +
+  geom_text(color="white", size=2) +
+  labs(title = "Difference from Average Ticket Price for NYC Archaeological Museums",
+       y = "Price",
+       x = "") +
+  theme(plot.title = element_text(hjust = 1.2)) +
+  scale_y_continuous(labels = scales::dollar) +
+  coord_flip() +
+  theme(legend.position="none")
+```
+
+```{r}
+#| label: fig-art-pricedifference
+#| fig-height: 10
+#| fig-cap: "Difference from average ticket price for NYC art museums"
+art |>
+  ggplot(
+    aes(x = name, y = price, label = pricedifference)) +
+  geom_point(size = 8, show.legend = FALSE, color = "#de8c00") +
+  geom_segment(aes(y = 8.621,
+               x = name,
+               yend = price,
+               xend = name),
+               color = "#de8c00") +
+  geom_text(color="white", size=2) +
+  labs(title = "Difference from Average Ticket Price for NYC Art Museums",
+       y = "Price",
+       x = "") +
+  theme(plot.title = element_text(hjust = 1.2)) +
+  scale_y_continuous(labels = scales::dollar) +
+  coord_flip() +
+  theme(legend.position="none")
+```
+
+```{r}
+#| label: fig-childrens-pricedifference
+#| fig-cap: "Difference from average ticket price for NYC children's museums"
+childrens |>
+  ggplot(
+    aes(x = name, y = price, label = pricedifference)) +
+  geom_point(size = 8, show.legend = FALSE, color = "#b79f00") +
+  geom_segment(aes(y = 12.43,
+               x = name,
+               yend = price,
+               xend = name),
+               color = "#b79f00") +
+  geom_text(color="white", size=2) +
+  labs(title = "Difference from Average Ticket Price for NYC Children's Museums",
+       y = "Price",
+       x = "") +
+  theme(plot.title = element_text(hjust = 1.3)) +
+  scale_y_continuous(labels = scales::dollar) +
+  coord_flip() +
+  theme(legend.position="none")
+```
+
+```{r}
+#| label: fig-cultural-pricedifference
+#| fig-cap: "Difference from average ticket price for NYC cultural museums"
+cultural |>
+  ggplot(
+    aes(x = name, y = price, label = pricedifference)) +
+  geom_point(size = 8, show.legend = FALSE, color = "#7cae00") +
+  geom_segment(aes(y = 2.91,
+               x = name,
+               yend = price,
+               xend = name),
+               color = "#7cae00") +
+  geom_text(color="white", size=2) +
+  labs(title = "Difference from Average Ticket Price for NYC Cultural Center Museums",
+       y = "Price",
+       x = "") +
+  theme(plot.title = element_text(hjust = 1.2)) +
+  scale_y_continuous(labels = scales::dollar) +
+  coord_flip() +
+  theme(legend.position="none")
+```
+
+```{r}
+#| label: fig-encyclopedic-pricedifference
+#| fig-cap: "Difference from average ticket price for NYC encyclopedic museums"
+encyclopedic |>
+  ggplot(
+    aes(x = name, y = price, label = pricedifference)) +
+  geom_point(size = 8, show.legend = FALSE, color = "#00ba38") +
+  geom_segment(aes(y = 16.33,
+               x = name,
+               yend = price,
+               xend = name),
+               color = "#00ba38") +
+  geom_text(color="white", size=2) +
+  labs(title = "Difference from Average Ticket Price for NYC Encyclopedic Museums",
+       y = "Price",
+       x = "") +
+  theme(plot.title = element_text(hjust = 1.3)) +
+  scale_y_continuous(labels = scales::dollar) +
+  coord_flip() +
+  theme(legend.position="none")
+```
+
+```{r}
+#| label: fig-historic-pricedifference
+#| fig-height: 10
+#| fig-cap: "Difference from average ticket price for NYC historic museums"
+historic |>
+  ggplot(
+    aes(x = name, y = price, label = pricedifference)) +
+  geom_point(size = 8, show.legend = FALSE, color = "#00c08b") +
+  geom_segment(aes(y = 4.12,
+               x = name,
+               yend = price,
+               xend = name),
+               color = "#00c08b") +
+  geom_text(color="white", size=2) +
+  labs(title = "Difference from Average Ticket Price for NYC Historic Site Museums",
+       y = "Price",
+       x = "") +
+  theme(plot.title = element_text(hjust = 1.2)) +
+  scale_y_continuous(labels = scales::dollar) +
+  coord_flip() +
+  theme(legend.position="none")
+```
+
+```{r}
+#| label: fig-history-pricedifference
+#| fig-cap: "Difference from average ticket price for NYC history museums"
+history |>
+  ggplot(
+    aes(x = name, y = price, label = pricedifference)) +
+  geom_point(size = 8, show.legend = FALSE, color = "#00bfc4") +
+  geom_segment(aes(y = 9.14,
+               x = name,
+               yend = price,
+               xend = name),
+               color = "#00bfc4") +
+  geom_text(color="white", size=2) +
+  labs(title = "Difference from Average Ticket Price for NYC History Museums",
+       y = "Price",
+       x = "") +
+  theme(plot.title = element_text(hjust = 1.2)) +
+  scale_y_continuous(labels = scales::dollar) +
+  coord_flip() +
+  theme(legend.position="none")
+```
+
+```{r}
+#| label: fig-library-pricedifference
+#| fig-cap: "Difference from average ticket price for NYC library museums"
+library |>
+  ggplot(
+    aes(x = name, y = price, label = pricedifference)) +
+  geom_point(size = 8, show.legend = FALSE, color = "#00b4f0") +
+  geom_segment(aes(y = 11,
+               x = name,
+               yend = price,
+               xend = name),
+               color = "#00b4f0") +
+  geom_text(color="white", size=2) +
+  labs(title = "Difference from Average Ticket Price for NYC Library Museums",
+       y = "Price",
+       x = "") +
+  theme(plot.title = element_text(hjust = 1.2)) +
+  scale_y_continuous(labels = scales::dollar) +
+  coord_flip() +
+  theme(legend.position="none")
+```
+
+```{r}
+#| label: fig-naturalhistory-pricedifference
+#| fig-cap: "Difference from average ticket price for NYC natural museums"
+natural |>
+  ggplot(
+    aes(x = name, y = price, label = pricedifference)) +
+  geom_point(size = 8, show.legend = FALSE, color = "#619cff") +
+  geom_segment(aes(y = 14,
+               x = name,
+               yend = price,
+               xend = name),
+               color = "#619cff") +
+  geom_text(color="white", size=2) +
+  labs(title = "Difference from Average Ticket Price for NYC Natural History 
+       Museums",
+       y = "Price",
+       x = "") +
+  theme(plot.title = element_text(hjust = 1.3)) +
+  scale_y_continuous(labels = scales::dollar) +
+  coord_flip() +
+  theme(legend.position="none")
+```
+
+```{r}
+#| label: fig-religious-pricedifference
+#| fig-cap: "Difference from average ticket price for NYC religious museums"
+religious |>
+  ggplot(
+    aes(x = name, y = price, label = pricedifference)) +
+  geom_point(size = 8, show.legend = FALSE, color = "#c77cff") +
+  geom_segment(aes(y = 5.67,
+               x = name,
+               yend = price,
+               xend = name),
+               color = "#c77cff") +
+  geom_text(color="white", size=2) +
+  labs(title = "Difference from Average Ticket Price for NYC Religious Museums",
+       y = "Price",
+       x = "") +
+  theme(plot.title = element_text(hjust = 1.3)) +
+  scale_y_continuous(labels = scales::dollar) +
+  coord_flip() +
+  theme(legend.position="none")
+```
+
+```{r}
+#| label: fig-specialty-pricedifference
+#| fig-height: 10
+#| fig-cap: "Difference from average ticket price for NYC specialty museums"
+specialty |>
+  ggplot(
+    aes(x = name, y = price, label = pricedifference)) +
+  geom_point(size = 8, show.legend = FALSE, color = "#f564e3") +
+  geom_segment(aes(y = 10.67,
+               x = name,
+               yend = price,
+               xend = name),
+               color = "#f564e3") +
+  geom_text(color="white", size=2) +
+  labs(title = "Difference from Average Ticket Price for NYC Specialty Museums",
+       y = "Price",
+       x = "") +
+  theme(plot.title = element_text(hjust = 1.1)) +
+  scale_y_continuous(labels = scales::dollar) +
+  coord_flip() +
+  theme(legend.position="none")
+```
+
+```{r}
+#| label: fig-war-pricedifference
+#| fig-cap: "Difference from average ticket price for NYC war museums"
+war |>
+  ggplot(
+    aes(x = name, y = price, label = pricedifference)) +
+  geom_point(size = 8, show.legend = FALSE, color = "#ff64b0") +
+  geom_segment(aes(y = 12,
+               x = name,
+               yend = price,
+               xend = name),
+               color = "#ff64b0") +
+  geom_text(color="white", size=2) +
+  labs(title = "Difference from Average Ticket Price for NYC War Museums",
+       y = "Price",
+       x = "") +
+  theme(plot.title = element_text(hjust = 1.3)) +
+  scale_y_continuous(labels = scales::dollar) +
+  coord_flip() +
+  theme(legend.position="none")
+```
+
+### Museums by Zip Codes {.unnumbered}
+
+```{r echo = FALSE, message = FALSE}
+#| label: ZCTA-to-MODZCTA
+ZCTA_to_MODZCTA <- read_csv("~/NYCmuseums/coronavirus-data-master/Geography-resources/ZCTA-to-MODZCTA.csv")
+```
+
+```{r}
+#| label: zcta-convert
+# if reopening must add rename(zip = ZCTA) |> bc the dataset will reset ?
+zcta_conv <- ZCTA_to_MODZCTA |>
+  rename(zip = ZCTA) |>
+  mutate(zip = as.character(zip))
+```
+
+```{r}
+#| label: museums-extract-zipcodes
+museumszip <- museums |>
+  drop_na() |>
+  separate(address, into = c("address", "zip"), sep = "Y ", fill = "right") |>
+  mutate(zip = case_when(nchar(zip) != 5 ~ substring(zip, 1,5),
+                         TRUE ~ zip)) |>
+  select(-address) |>
+  inner_join(zcta_conv, by = "zip")
+
+
+```
+
+```{r}
+#| label: countby-zipcode
+countzip <- museumszip |>
+  drop_na() |>
+  group_by(zip) |>
+  count() |>
+  arrange(desc(n)) 
+```
+
+```{r}
+#| label: topzip-borough
+
+countzipborough <- countzip |>
+  inner_join(zipborough, by = "zip")
+
+countzipborough |>
+  select(zip, borough) |>
+  head(20) |>
+  rename("Zip Code" = "zip", "Borough" = "borough") |>
+  kable(format = "markdown", padding=10, caption = "Boroughs of the top 20 zip codes with the most museums") |>
+  scroll_box(width = "500px", height = "100px") 
+
+```
+
+
+```{r}
+#| label: fig-museums-zipcode
+#| fig-cap: "Number of museums in NYC by zip code"
+countzip |>
+  ggplot(
+    aes(x = zip, y = n, fill = n)) +
+  geom_bar(aes(reorder(zip, -n)),
+               stat = "identity", show.legend = F) + 
+  theme(axis.text.x = element_text(angle = 90, size = 7)) +
+  labs(x = "Zip Code",
+       y = "Number of Museums",
+       title = "Number of Museums in NYC by Zip Code")
+```
+
+```{r echo = FALSE, message = FALSE}
+#| label: read-modzcta
+modzcta <- read_sf("coronavirus-data-master/Geography-resources/MODZCTA_2010.shp")
+zcta_conv <- vroom("coronavirus-data-master/Geography-resources/ZCTA-to-MODZCTA.csv", delim = ",")
+```
+
+```{r warning = FALSE, message = FALSE, results = FALSE}
+#| label: merge-with-shapefile
+
+auto_copy(modzcta, countzip, copy = TRUE)
+
+options(tigris_use_cache = TRUE)
+zipmodzcta <- geo_join(modzcta, countzip, "MODZCTA", "zip", how = "inner") 
+
+auto_copy(zipmodzcta, museumszip, copy = TRUE)
+
+zipmodzcta <- geo_join(zipmodzcta, museumszip, "MODZCTA", "zip", how = "inner") |>
+  select(c(MODZCTA, label, geometry, n, name)) |>
+  group_by(MODZCTA, label, geometry, n) |>
+  summarise(name = paste(name, collapse= ", ")) |>
+  separate(name, into = c("name1", "name2", "name3", "name4", "name5", "name6"), sep = ", ") 
+  
+ungroup(zipmodzcta)
+
+
+```
+
+```{r}
+#| label: save-df-for-shiny
+#| eval: false
+saveRDS(zipmodzcta, "NYC_museums/zipmodzcta.RDS")
+```
+
+```{r}
+#| label: labels-and-color-palette
+zipmodzcta <- zipmodzcta |>
+  mutate(name2 = replace_na(name2, ""),
+         name3 = replace_na(name3, ""),
+         name4 = replace_na(name4, ""),
+         name5 = replace_na(name5, ""),
+         name6 = replace_na(name6, ""))
+
+labels <- paste(
+  "<strong>", zipmodzcta$MODZCTA,
+  "</strong><br/>", zipmodzcta$n, "museums", 
+  "</strong><br>", zipmodzcta$name1,
+  "</strong><br>", zipmodzcta$name2,
+  "</strong><br>", zipmodzcta$name3,
+  "</strong><br>", zipmodzcta$name4,
+  "</strong><br>", zipmodzcta$name5,
+  "</strong><br>", zipmodzcta$name6) |>
+  lapply(htmltools::HTML)
+
+pal <- colorNumeric(palette = "RdPu", 6, domain = zipmodzcta$n)
+
+```
+
+```{r warning = FALSE}
+#| label: fig-map
+#| fig-cap: "Museums in each NYC zip code"
+mymap <- zipmodzcta |>
+  st_transform(crs = "+init=epsg:4326") |>
+  leaflet() |>
+  addProviderTiles("CartoDB.Positron") |>
+  addPolygons(label = labels,
+              stroke = FALSE,
+              smoothFactor = 0.5,
+              opacity = 1,
+              fillOpacity = 0.7,
+              fillColor = ~ pal(n),
+              highlightOptions = highlightOptions(weight = 5,
+                                                  fillOpacity = 1,
+                                                  color = "black",
+                                                  opacity = 1,
+                                                  bringToFront = TRUE)) |>
+  addLegend("bottomright",
+            pal = pal,
+            values = ~ n,
+            bins = c(1,2,3,4,5,6),
+            title = "Number of Museums",
+            opacity = 0.7)
+
+mymap
+```
+
+## Results {.unnumbered}
+
+Figure \@ref(fig:fig-number-by-category) gives us a general look at the number of museums there are for each category, and we can see that the most frequent categories are art, specialty, and historic site. From Figure \@ref(fig:fig-number-by-price), we can see the most common price points for admission tickets. It appears that museums commonly price tickets at \$5 intervals, with the greatest number of museums being free, followed by \$5, \$10, \$15, and \$25. Table \@ref(tab:catmeanprice) shows the mean prices for each museum category. Those with the lowest average prices are cultural center (\$2.91), historic site (\$4.12), archaeological (\$4.30), religious (\$5.67), and art (\$8.62). Figures \@ref(fig:fig-archaeological-pricedifference), \@ref(fig:fig-art-pricedifference), \@ref(fig:fig-childrens-pricedifference), \@ref(fig:fig-cultural-pricedifference), \@ref(fig:fig-encyclopedic-pricedifference), \@ref(fig:fig-historic-pricedifference), \@ref(fig:fig-history-pricedifference), \@ref(fig:fig-library-pricedifference), \@ref(fig:fig-naturalhistory-pricedifference), \@ref(fig:fig-religious-pricedifference), \@ref(fig:fig-specialty-pricedifference), \@ref(fig:fig-war-pricedifference) show the prices of each museum for each category, along with the difference from the category mean price. This allows for someone to choose a category of interest first, take into consideration the mean price for that category, and then look at the prices of each individual museum within that category. For example, of the five categories with the lowest mean prices, I am most interested in art museums. Looking at Figure \@ref(fig:fig-art-pricedifference), I can look at individual museums and find which ones interest me the most. Ones that caught my eye are the American Academy of Arts and Letters (\$0), National Academy of Design (\$0), and the Noguchi Museum (\$10). Table \@ref(tab:topzip-borough) lists the top 20 zip codes with the most museums, along with their respective boroughs. We can see that the top codes are almost all in Manhattan, with a few in Queens. Based on Figure \@ref(fig:fig-museums-zipcode), the bar graph showing the number of museums in each zip code, we can see that 10013 has the most, with 6 museums, and 10011 and 10019 are following with 5 museums each. Then, continuing on the Figure \@ref(fig:fig-map), an interactive map showing each zip code in NYC, color-coordinated based on number of museums, we can easily locate those top zip codes. We can see that 10013, 10011, and 10019 are all relatively close together, so they would be ideal regions to travel to in order to maximize museum visits.
+
+## Discussion {.unnumbered}
+
+In this project I looked at the variables of museum name, category, ticket price, and address (zip code) in order to narrow down potential destinations most suitable for my time, budget, and geographical constraints. I was able to make some conclusions, but there were definitely limitations that affected my results. 
+
+A limitation of the raw data set was that there was some missing information for some museums including ticket price and address, so those were eliminated in the rest of the analysis and visualization. The MODZCTA shape file was obtained a bit arbitrarily, as I just needed a shape file that would allow me to plot the zip code locations for the museums. The MODZCTA file was originally used to plot health data, particularly COVID-19, in NYC areas. They are modified to combine zip codes with smaller populations to allow for more stable rate calculations. In the context of my project, I do not need to examine population, so it was not necessary to combine smaller zip codes, but this was the only avenue I could access that would allow me to map the museum locations.
+
+Additionally, since this project's original purpose was to explore and try out ggplot functions beyond the basic ones we went over in class, the choice of visuals may not be the most suitable, referring particularly to the lollipop graphs. There are other forms of graphs that probably would have been more fitting at communicating the information I wanted. Instead, I chose the type of graph I wanted to try out and modified the data to fit that style. Ideally, I should choose the graph or method of communication that best fits the variables and question I intend to address.
+
+Finally, I must acknowledge that I can not make a complete conclusion as to which museum is the most ideal as the information provided in this data and analysis is simply not enough. It would require more research into the contents of the museum as well as the specific location and transportation situations unique to each one. However, this did help me organize and visualize the wide variety of museums to choose from.

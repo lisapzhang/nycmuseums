@@ -1,0 +1,16 @@
+---
+title: "About"
+format: html
+editor: source
+---
+
+### About Me {-}
+My name is Lisa Zhang and I am a current freshman at Duke University intending to major in Statistical Science. I am interested in data science, particularly in creating visualizations to communicate data. This past fall semester, I took STA-199 Intro to Data Science, which spurred my interest in creating data visualizations and advancing my proficiency in R. Others hobbies of mine include art and design as they provide me the avenue to produce creative and visually stimulating projects.
+
+### About This Project {-}
+As my first semester at Duke drew to an end, and with it, my first class in data science, I knew that I wanted to continue pursuing this field. Over winter break, I thought that I should do some practice in R so I wouldn't forget how to apply the tools I learned over the semester. I started out just creating simple ggplots and reviewing the exercises we did in class, but I quickly started exploring functions in R that extended beyond what was taught in lectures. I picked a topic that I was interested in and ended up having a lot of fun learning new things and creating new visuals in R. My ultimate goal of this independent project is to create a functional Shiny app; I have made progress but have not quite reached the finished product. Since Shiny was not covered in the course except the short introduction on the last day of class, I have been exploring Shiny resources online myself. My vision for the app is to have a leaflet main panel and inputs for various zip codes, which then allow the map to display the number of museums in the selected zip code as well as the list of those museums.
+
+Sources:  
+https://museumhack.com/museums-in-nyc/#list-museums-in-NYC  
+https://www.youtube.com/watch?v=eIpiL6y1oQQ  
+https://github.com/nychealth/coronavirus-data/tree/master/Geography-resources  
