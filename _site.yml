@@ -1,7 +1,7 @@
 name: "nycmuseums"
 project:
   type: website
-  output_dir: "_site"
+  output_dir: "docs"
 
 website:
 navbar:
